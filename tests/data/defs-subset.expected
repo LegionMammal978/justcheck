@@ -1,0 +1,31 @@
+warning: Proof incomplete
+   --> defs.mm:140:1
+    |
+140 | / inc $p |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $=
+141 | |   wph wps wa wph wps wn wi wn wb ? wph wps df-an ? ax-just $.
+    | |_____________________________________________________________- Proof is incomplete
+    |
+error[rule 1]: $j bound: 'nonexistent' is not a math constant
+error[rule 1]: $j bound: 'ph' is not a math constant
+error[rule 2]: $j primitive: unknown label 'nolabel'
+error[rule 2]: $j primitive: 'biid' is not a syntax axiom
+error[rule 3]: $j definition: 'nosuch' is not a syntax axiom
+error[rule 3]: $j definition: primitive constructor 'wn' has a $j definition
+error[rule 3]: $j definition: constructor 'wbi2' has more than one $j definition
+error[rule 7]: wdup: variables occur more than once: ph
+error[rule 5]: vnew: typecode 'setvar' is bound
+error[rule 9]: df-prim: not the associated definition of any defined constructor; its conclusion contains: wb (primitive), wprim (primitive)
+error[rule 8]: wnodef: defined constructor has no associated definition
+error[rule 16]: bad16: $e hypothesis bad16.1 contains the associated constructor 'wa'
+error[rule 18]: bad18: final step uses df-an, which is not an assertion with exactly two $e hypotheses
+error[rule 19]: bad19: first subproof's conclusion does not match the final step's conclusion; it is '( ( ph /\ ps ) <-> -. ( ph -> -. ps ) )'
+error[rule 21]: bad19: second subproof's conclusion is not the final step's conclusion with the definiens (RHS) substituted
+  expected: ( ( -. ( ph -> -. ps ) <-> -. ( ph -> -. ps ) ) -> ( -. ( ph -> -. ps ) <-> -. ( ph -> -. ps ) ) )
+  found:    ( -. ( ph -> -. ps ) <-> -. ( ph -> -. ps ) )
+error[rule 20]: bad20: first subproof ends in ax-just, not in the definition axiom df-an
+error: inc: justified theorem does not have a complete, valid proof (ProofIncomplete)
+error[rule 21]: bad21: 'TOP', which replaces hidden variable 'ph', is not a variable
+error[rule 15]: bad15: contains 'wtru', which is defined later than the associated constructor 'wa'
+error[rule 15]: bad15: proof contains syntax defined later than the associated constructor 'wa': wtru (wtru)
+error[rule 9]: df-jk: associated definition of more than one defined constructor: wj wk
+21 errors, 0 warnings, 1 database diagnostics
