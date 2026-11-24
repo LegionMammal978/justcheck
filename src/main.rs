@@ -1,4 +1,5 @@
 mod check;
+mod earley;
 mod expr;
 mod pattern;
 
@@ -44,7 +45,6 @@ fn main() -> ExitCode {
     });
     db.parse(cli.database, vec![]);
     db.verify_pass();
-    db.stmt_parse_pass();
 
     let mut out = std::io::stdout().lock();
     let renderer = if out.is_terminal() {

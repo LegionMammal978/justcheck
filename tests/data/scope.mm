@@ -32,7 +32,7 @@ df-c $a |- R A C $.
 $( Only the shape of the expansion statement matters: C := F x. $)
 ax-cexp $a |- C = F x $.
 
-$( Rule 23 should reject $d z B, since B is a class variable outside the
+$( Rule 25 should reject $d z B, since B is a class variable outside the
    arguments.  The checker looks up B's type from its first $f, a setvar. $)
 ${
   $d z B $.

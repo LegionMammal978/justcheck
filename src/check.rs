@@ -1,16 +1,21 @@
 //! The definition rules of `README.md`.
 
-use std::collections::{HashMap, HashSet};
-use std::fmt::Write as _;
+mod proof;
+mod syntax;
 
+use std::collections::{HashMap, HashSet};
+
+use metamath_rs::diag::Diagnostic;
 use metamath_rs::nameck::Nameset;
-use metamath_rs::proof::ProofTreeArray;
 use metamath_rs::scopeck::{Frame, Hyp};
 use metamath_rs::statement::{CommandToken, StatementAddress, SymbolType};
-use metamath_rs::{Database, Formula, Label, StatementRef, StatementType, Symbol, as_str};
+use metamath_rs::{Database, Label, StatementRef, StatementType, Symbol, as_str};
 
-use crate::expr::{Expr, TemplateTok, Tok};
-use crate::pattern::Pattern;
+use crate::earley::{Grammar, Nt};
+use crate::expr::{Expr, Pattern, Store, TemplateTok, TermId};
+use crate::pattern::Pattern as LabelPattern;
+
+use self::proof::Proof;
 
 /// A problem found by the checker.
 #[derive(Debug)]
@@ -31,6 +36,8 @@ struct SyntaxAxiom {
     name: String,
     typecode: Symbol,
     template: Vec<TemplateTok>,
+    /// The distinct variables, in order of appearance.
+    vars: Vec<Symbol>,
     arity: usize,
     /// Variables that occur more than once in the math string.
     repeated_vars: Vec<String>,
@@ -60,7 +67,10 @@ pub struct Checker<'a> {
     nset: &'a Nameset,
     /// Position of every statement in database order.
     pos: HashMap<StatementAddress, u32>,
-    var_types: HashSet<Symbol>,
+    /// The syntactic types.
+    syntactic: HashSet<Symbol>,
+    /// The logical types, with their corresponding types.
+    logical: HashMap<Symbol, Symbol>,
     bound_types: HashSet<Symbol>,
     /// `$f` label to (variable, typecode).
     floats: HashMap<Label, (Symbol, Symbol)>,
@@ -71,8 +81,19 @@ pub struct Checker<'a> {
     /// `$j definition` targets of each syntax axiom, with the position of the
     /// `$j` comment.
     jdefs: Vec<Vec<(u32, Vec<u8>)>>,
+    /// The nonterminal of each syntactic type.
+    type_index: HashMap<Symbol, Nt>,
+    /// The grammar of the syntax constructors, with the syntax axiom of each
+    /// of its productions.
+    grammar: Option<(Grammar<Symbol>, Vec<usize>)>,
+    /// The parse tree of each `$a`, `$e` and `$p` statement that has one.
+    trees: HashMap<StatementAddress, Expr>,
+    /// The parse trees again, as terms of `store`.
+    terms: HashMap<StatementAddress, TermId>,
+    store: Store,
     /// Constructors contained in each assertion, sorted.
     contains: HashMap<StatementAddress, Box<[usize]>>,
+    /// Assertions whose conclusion or hypotheses have no parse tree.
     unparsed: HashSet<StatementAddress>,
     defs: HashMap<StatementAddress, DefAxiom>,
     expansions: Vec<Option<Expansion>>,
@@ -86,21 +107,27 @@ pub struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    /// Prepares a checker. The database must have run the name, scope, grammar
-    /// and statement parse passes.
+    /// Prepares a checker. The database must have run the name and scope
+    /// passes. Its grammar and statement parse passes are not used.
     pub fn new(db: &'a Database) -> Self {
         let nset = &**db.name_result();
         let mut checker = Checker {
             db,
             nset,
             pos: HashMap::new(),
-            var_types: HashSet::new(),
+            syntactic: HashSet::new(),
+            logical: HashMap::new(),
             bound_types: HashSet::new(),
             floats: HashMap::new(),
             syntax: Vec::new(),
             syntax_index: HashMap::new(),
             primitive: Vec::new(),
             jdefs: Vec::new(),
+            type_index: HashMap::new(),
+            grammar: None,
+            trees: HashMap::new(),
+            terms: HashMap::new(),
+            store: Store::default(),
             contains: HashMap::new(),
             unparsed: HashSet::new(),
             defs: HashMap::new(),
@@ -119,7 +146,7 @@ impl<'a> Checker<'a> {
                 ) else {
                     continue;
                 };
-                checker.var_types.insert(tc);
+                checker.syntactic.insert(tc);
                 checker.floats.insert(label, (var, tc));
             }
         }
@@ -135,27 +162,23 @@ impl<'a> Checker<'a> {
     /// Runs every check. The definition axioms are the `$a` statements
     /// matched by `defs` and not by `exclude`; the rules specific to a
     /// definition axiom are enforced for those also matched by `include`.
-    pub fn run(mut self, defs: &Pattern, include: &Pattern, exclude: &Pattern) -> Vec<Diag> {
+    pub fn run(
+        mut self,
+        defs: &LabelPattern,
+        include: &LabelPattern,
+        exclude: &LabelPattern,
+    ) -> Vec<Diag> {
+        self.read_syntax_commands();
         self.collect_syntax();
         self.read_j_commands();
+        self.build_grammar();
+        self.parse_statements();
         self.collect_contains();
         self.check_syntax();
         self.check_dv();
         self.check_definitions(defs, include, exclude);
         self.check_expansions();
-        self.check_justified();
-        if !self.unparsed.is_empty() {
-            self.diags.push(Diag {
-                pos: 0,
-                label: "database".into(),
-                rule: Some(4),
-                msg: format!(
-                    "{} assertions could not be parsed, so the results are incomplete",
-                    self.unparsed.len()
-                ),
-                warning: false,
-            });
-        }
+        self.check_proofs();
         self.diags.sort_by_key(|d| (d.pos, d.rule));
         self.diags
     }
@@ -187,8 +210,9 @@ impl<'a> Checker<'a> {
         self.db.scope_result().get(sref.label())
     }
 
-    fn formula(&self, sref: &StatementRef<'_>) -> Option<&'a Formula> {
-        self.db.stmt_parse_result().get_formula(sref)
+    /// The parse tree of an `$a`, `$e` or `$p` statement.
+    fn tree(&self, addr: StatementAddress) -> Option<&Expr> {
+        self.trees.get(&addr)
     }
 
     fn is_bound(&self, typecode: Symbol) -> bool {
@@ -217,52 +241,58 @@ impl<'a> Checker<'a> {
         });
     }
 
-    fn arity(&self, label: Label) -> Option<usize> {
-        self.syntax_index.get(&label).map(|&i| self.syntax[i].arity)
-    }
-
-    fn expr(&self, f: &Formula) -> Option<Expr> {
-        Expr::from_formula(f, &|l| self.arity(l))
-    }
-
     fn constructor_name(&self, c: usize) -> &str {
         &self.syntax[c].name
     }
 
-    /// Flattens a parse tree into tokens. `leaf` may handle a subtree itself
-    /// by writing its tokens and returning true.
-    fn flatten(&self, e: &Expr, out: &mut Vec<Tok>, leaf: &mut dyn FnMut(&Expr, &mut Vec<Tok>) -> bool) {
-        if leaf(e, out) {
-            return;
-        }
+    /// Flattens a parse tree into its math string.
+    fn flatten(&self, e: &Expr, out: &mut Vec<&'a str>) {
         match e {
-            Expr::Var(label) => out.push(Tok::Sym(self.floats[label].0)),
+            Expr::Var(label) => out.push(self.name(self.floats[label].0)),
             Expr::App(label, args) => {
-                let s = &self.syntax[self.syntax_index[label]];
-                for &t in &s.template {
+                for &t in &self.syntax[self.syntax_index[label]].template {
                     match t {
-                        TemplateTok::Const(sym) => out.push(Tok::Sym(sym)),
-                        TemplateTok::Arg(i) => self.flatten(&args[i], out, leaf),
+                        TemplateTok::Const(sym) => out.push(self.name(sym)),
+                        TemplateTok::Arg(i) => self.flatten(&args[i], out),
                     }
                 }
             }
         }
     }
 
-    fn render_toks(&self, toks: &[Tok], hole_names: &[Label]) -> String {
-        let mut s = String::new();
-        for (i, t) in toks.iter().enumerate() {
-            if i > 0 {
-                s.push(' ');
-            }
-            match *t {
-                Tok::Sym(sym) => s.push_str(self.name(sym)),
-                Tok::Hole(h) => {
-                    let _ = write!(s, "?{}", self.name(self.floats[&hole_names[h]].0));
+    fn render(&self, e: &Expr) -> String {
+        let mut toks = Vec::new();
+        self.flatten(e, &mut toks);
+        toks.join(" ")
+    }
+
+    /// Renders a pattern as a math string, where hole `h` is shown as the
+    /// variable of the `$f` statement `holes[h]` with a question mark.
+    fn render_pattern(&self, p: &Pattern, holes: &[Label], out: &mut Vec<String>) {
+        match p {
+            Pattern::Var(label) => out.push(self.name(self.floats[label].0).to_owned()),
+            Pattern::Hole(h) => out.push(format!("?{}", self.name(self.floats[&holes[*h]].0))),
+            Pattern::App(label, args) => {
+                for &t in &self.syntax[self.syntax_index[label]].template {
+                    match t {
+                        TemplateTok::Const(sym) => out.push(self.name(sym).to_owned()),
+                        TemplateTok::Arg(i) => self.render_pattern(&args[i], holes, out),
+                    }
                 }
             }
         }
-        s
+    }
+
+    /// Renders a parse tree as an S-expression of labels.
+    fn sexpr(&self, e: &Expr) -> String {
+        match e {
+            Expr::Var(label) => self.name(*label).to_owned(),
+            Expr::App(label, args) if args.is_empty() => self.name(*label).to_owned(),
+            Expr::App(label, args) => {
+                let args: Vec<String> = args.iter().map(|a| self.sexpr(a)).collect();
+                format!("({} {})", self.name(*label), args.join(" "))
+            }
+        }
     }
 
     /// Variables occurring in the math strings of a statement's conclusion
@@ -293,7 +323,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let Some(tc) = self.symbol(&sref.math_at(0)) else { continue };
-            if !self.var_types.contains(&tc) {
+            if !self.syntactic.contains(&tc) {
                 continue;
             }
             let Some(label) = self.label_atom(sref.label()) else { continue };
@@ -324,6 +354,7 @@ impl<'a> Checker<'a> {
                 typecode: tc,
                 template,
                 arity: seen.len(),
+                vars: seen,
                 repeated_vars,
             });
         }
@@ -353,17 +384,17 @@ impl<'a> Checker<'a> {
                     b"bound" => {
                         for tc in values() {
                             match self.nset.lookup_symbol(&tc) {
-                                // Rule 1. A constant that is not a variable
+                                // Rule 2. A constant that is not a syntactic
                                 // type is allowed, but is not a bound type.
                                 Some(s) if s.stype == SymbolType::Constant => {
-                                    if self.var_types.contains(&s.atom) {
+                                    if self.syntactic.contains(&s.atom) {
                                         self.bound_types.insert(s.atom);
                                     }
                                 }
                                 _ => self.report_at(
                                     pos,
                                     "$j bound".into(),
-                                    Some(1),
+                                    Some(2),
                                     format!("'{}' is not a math constant", as_str(&tc)),
                                     false,
                                 ),
@@ -375,11 +406,11 @@ impl<'a> Checker<'a> {
                             let atom = self.label_atom(&label);
                             match atom.and_then(|a| self.syntax_index.get(&a)) {
                                 Some(&i) => self.primitive[i] = true,
-                                // Rule 2.
+                                // Rule 3.
                                 None => self.report_at(
                                     pos,
                                     "$j primitive".into(),
-                                    Some(2),
+                                    Some(3),
                                     match atom {
                                         Some(_) => format!("'{}' is not a syntax axiom", as_str(&label)),
                                         None => format!("unknown label '{}'", as_str(&label)),
@@ -403,7 +434,7 @@ impl<'a> Checker<'a> {
                                 None => self.report_at(
                                     pos,
                                     "$j definition".into(),
-                                    Some(3),
+                                    Some(4),
                                     format!(
                                         "'{}' is not a syntax axiom",
                                         as_str(&constructor)
@@ -415,7 +446,7 @@ impl<'a> Checker<'a> {
                         _ => self.report_at(
                             pos,
                             "$j definition".into(),
-                            Some(3),
+                            Some(4),
                             "malformed command, expected `definition 'label' for 'label';`".into(),
                             false,
                         ),
@@ -426,13 +457,9 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn formula_constructors(&self, f: &Formula, out: &mut Vec<usize>) {
-        for (label, is_var) in f.labels_iter() {
-            if !is_var
-                && let Some(&i) = self.syntax_index.get(&label) {
-                    out.push(i);
-                }
-        }
+    /// The constructors of a parse tree, in pre-order.
+    fn constructors(&self, e: &Expr, out: &mut Vec<usize>) {
+        e.for_each_app(&mut |label, _| out.push(self.syntax_index[&label]));
     }
 
     fn collect_contains(&mut self) {
@@ -447,16 +474,11 @@ impl<'a> Checker<'a> {
                 cs.push(i);
             } else {
                 let mut parsed = true;
-                match self.formula(&sref) {
-                    Some(f) => self.formula_constructors(f, &mut cs),
-                    None => parsed = false,
-                }
-                if let Some(frame) = self.frame(sref) {
-                    for hyp in Self::essentials(frame) {
-                        match self.formula(&self.stmt(hyp)) {
-                            Some(f) => self.formula_constructors(f, &mut cs),
-                            None => parsed = false,
-                        }
+                let hyps = self.frame(sref).into_iter().flat_map(Self::essentials);
+                for a in std::iter::once(addr).chain(hyps) {
+                    match self.tree(a) {
+                        Some(e) => self.constructors(e, &mut cs),
+                        None => parsed = false,
                     }
                 }
                 if !parsed {
@@ -487,7 +509,7 @@ impl<'a> Checker<'a> {
     }
 
     // ---------------------------------------------------------------------
-    // Syntax and types: rules 5 and 7
+    // Syntax and types: rules 7 and 9
 
     fn check_syntax(&mut self) {
         for i in 0..self.syntax.len() {
@@ -496,20 +518,20 @@ impl<'a> Checker<'a> {
             let mut msgs = Vec::new();
             if let Some(frame) = self.frame(self.stmt(addr)) {
                 if Self::essentials(frame).next().is_some() {
-                    msgs.push((7, "syntax axiom has $e hypotheses".to_owned()));
+                    msgs.push((9, "syntax axiom has $e hypotheses".to_owned()));
                 }
                 if !frame.mandatory_dv.is_empty() {
-                    msgs.push((7, "syntax axiom has DV restrictions".to_owned()));
+                    msgs.push((9, "syntax axiom has DV restrictions".to_owned()));
                 }
             }
             if !s.repeated_vars.is_empty() {
                 msgs.push((
-                    7,
+                    9,
                     format!("variables occur more than once: {}", s.repeated_vars.join(" ")),
                 ));
             }
             if self.is_bound(s.typecode) {
-                msgs.push((5, format!("typecode '{}' is bound", self.name(s.typecode))));
+                msgs.push((7, format!("typecode '{}' is bound", self.name(s.typecode))));
             }
             for (rule, msg) in msgs {
                 self.report(addr, Some(rule), msg);
@@ -517,7 +539,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Rule 6.
+    /// Rule 8.
     fn check_dv(&mut self) {
         let db = self.db;
         for sref in db.statements() {
@@ -551,7 +573,7 @@ impl<'a> Checker<'a> {
             if !pairs.is_empty() {
                 self.report(
                     sref.address(),
-                    Some(6),
+                    Some(8),
                     format!(
                         "mandatory DV restriction between variables of non-bound type: {}",
                         pairs.join(", ")
@@ -562,9 +584,14 @@ impl<'a> Checker<'a> {
     }
 
     // ---------------------------------------------------------------------
-    // Definition axioms: rules 8 and 9
+    // Definition axioms: rules 10 and 11
 
-    fn check_definitions(&mut self, defs: &Pattern, include: &Pattern, exclude: &Pattern) {
+    fn check_definitions(
+        &mut self,
+        defs: &LabelPattern,
+        include: &LabelPattern,
+        exclude: &LabelPattern,
+    ) {
         let db = self.db;
         let n = self.syntax.len();
 
@@ -583,21 +610,14 @@ impl<'a> Checker<'a> {
             }
             let enforced = include.matches(label, pos);
             let mut cs = Vec::new();
-            let mut parsed = true;
-            match self.formula(&sref) {
-                Some(f) => self.formula_constructors(f, &mut cs),
-                None => parsed = false,
-            }
-            if let Some(frame) = self.frame(sref) {
-                for hyp in Self::essentials(frame) {
-                    match self.formula(&self.stmt(hyp)) {
-                        Some(f) => self.formula_constructors(f, &mut cs),
-                        None => parsed = false,
+            let hyps = self.frame(sref).into_iter().flat_map(Self::essentials);
+            for a in std::iter::once(addr).chain(hyps) {
+                match self.tree(a) {
+                    Some(e) => self.constructors(e, &mut cs),
+                    None => {
+                        self.unparsed.insert(addr);
                     }
                 }
-            }
-            if !parsed {
-                self.unparsed.insert(addr);
             }
             cs.sort_unstable();
             cs.dedup();
@@ -620,12 +640,12 @@ impl<'a> Checker<'a> {
         self.rank = assoc.iter().map(|a| a.map(|a| self.pos[&a])).collect();
         self.enforced = vec![false; n];
 
-        // Rules 8 and 9, for the whole database.
+        // Rules 10 and 11, for the whole database.
         for (c, a) in assoc.iter().enumerate() {
             if !self.primitive[c] && a.is_none() {
                 self.report(
                     self.syntax[c].addr,
-                    Some(8),
+                    Some(10),
                     "defined constructor has no associated definition".into(),
                 );
             }
@@ -643,7 +663,7 @@ impl<'a> Checker<'a> {
                         .collect();
                     self.report(
                         *addr,
-                        Some(9),
+                        Some(11),
                         format!(
                             "not the associated definition of any defined constructor; it contains: {}",
                             if contained.is_empty() { "nothing".to_owned() } else { contained.join(", ") }
@@ -661,7 +681,7 @@ impl<'a> Checker<'a> {
                         "associated definition of more than one defined constructor: {}",
                         names.join(" ")
                     );
-                    self.report(*addr, Some(9), msg);
+                    self.report(*addr, Some(11), msg);
                 }
             }
         }
@@ -678,7 +698,7 @@ impl<'a> Checker<'a> {
     }
 
     // ---------------------------------------------------------------------
-    // Expansions: rules 3 and 10 to 13
+    // Expansions: rules 4 and 12 to 15
 
     fn check_expansions(&mut self) {
         for c in 0..self.syntax.len() {
@@ -690,7 +710,7 @@ impl<'a> Checker<'a> {
                     self.report_at(
                         *pos,
                         "$j definition".into(),
-                        Some(3),
+                        Some(4),
                         format!("primitive constructor '{name}' has a $j definition"),
                         false,
                     );
@@ -702,7 +722,7 @@ impl<'a> Checker<'a> {
                     self.report_at(
                         *pos,
                         "$j definition".into(),
-                        Some(3),
+                        Some(4),
                         format!("constructor '{name}' has more than one $j definition"),
                         false,
                     );
@@ -720,7 +740,7 @@ impl<'a> Checker<'a> {
                 self.report_at(
                     *pos,
                     "$j definition".into(),
-                    Some(3),
+                    Some(4),
                     format!("'{}' is not an $a or $p statement", as_str(target)),
                     false,
                 );
@@ -733,7 +753,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Extracts the expansion of constructor `c` from the given expansion
-    /// statement, checking rules 10 to 13. `jpos` is the position of the
+    /// statement, checking rules 12 to 15. `jpos` is the position of the
     /// `$j definition` that named it, if any.
     fn expansion_from(
         &mut self,
@@ -747,7 +767,7 @@ impl<'a> Checker<'a> {
             Some(_) => format!("expansion statement of '{name}' (from $j definition)"),
             None => format!("expansion statement of '{name}'"),
         };
-        let Some(e) = self.formula(&sref).and_then(|f| self.expr(f)) else {
+        let Some(e) = self.tree(addr).cloned() else {
             self.unparsed.insert(addr);
             return None;
         };
@@ -756,14 +776,14 @@ impl<'a> Checker<'a> {
             _ => {
                 self.report(
                     addr,
-                    Some(10),
+                    Some(12),
                     format!("{via}: root of the conclusion is not a constructor with two arguments"),
                 );
                 return None;
             }
         };
 
-        // Rule 11.
+        // Rule 13.
         let label = self.label_atom(self.stmt(self.syntax[c].addr).label())?;
         let lhs_vars: Option<Vec<Label>> = match lhs {
             Expr::App(l, args) if *l == label => args
@@ -780,7 +800,7 @@ impl<'a> Checker<'a> {
             _ => {
                 self.report(
                     addr,
-                    Some(11),
+                    Some(13),
                     format!("{via}: definiendum (LHS) is not '{name}' applied to distinct variables"),
                 );
                 return None;
@@ -788,7 +808,7 @@ impl<'a> Checker<'a> {
         };
         let mut ok = true;
 
-        // Rule 13.
+        // Rule 15.
         if let Some(frame) = self.frame(sref) {
             let lhs_syms: Vec<Symbol> = lhs_vars.iter().map(|v| self.floats[v].0).collect();
             let pairs: Vec<String> = frame
@@ -801,7 +821,7 @@ impl<'a> Checker<'a> {
             if !pairs.is_empty() {
                 self.report(
                     addr,
-                    Some(13),
+                    Some(15),
                     format!(
                         "{via}: DV restriction between definiendum (LHS) variables: {}",
                         pairs.join(", ")
@@ -811,7 +831,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // Rule 12.
+        // Rule 14.
         let mut bad = Vec::new();
         rhs.for_each_app(&mut |l, _| {
             let i = self.syntax_index[&l];
@@ -823,7 +843,7 @@ impl<'a> Checker<'a> {
             let names: Vec<&str> = bad.iter().map(|&i| self.constructor_name(i)).collect();
             self.report(
                 addr,
-                Some(12),
+                Some(14),
                 format!(
                     "{via}: definiens (RHS) contains the constructor itself or a later-defined constructor: {}",
                     names.join(" ")
@@ -846,10 +866,11 @@ impl<'a> Checker<'a> {
     }
 
     // ---------------------------------------------------------------------
-    // Justified theorems: rules 14 to 23
+    // Proofs: rule 5, and the justified theorems of rules 16 to 25
 
-    fn check_justified(&mut self) {
+    fn check_proofs(&mut self) {
         let db = self.db;
+        let mark = self.store.mark();
         for sref in db.statements() {
             if sref.statement_type() != StatementType::Provable {
                 continue;
@@ -861,41 +882,79 @@ impl<'a> Checker<'a> {
                         referenced.push(l.address);
                     }
             }
+            // Rule 5, for every proof in the database.
+            let proof = self.replay(sref);
             match referenced[..] {
                 [] => {}
-                [def] if self.defs[&def].enforced => self.check_justified_theorem(sref, def),
+                [def] if self.defs[&def].enforced => self.check_justified_theorem(sref, def, proof),
                 [_] => {}
-                // Like the other rules about a proof, rule 14 is only
+                // Like the other rules about a proof, rule 16 is only
                 // enforced when it involves a selected definition axiom.
                 _ if !referenced.iter().any(|d| self.defs[d].enforced) => {}
                 _ => {
                     let names: Vec<String> = referenced.iter().map(|&a| self.stmt_name(a)).collect();
                     self.report(
                         sref.address(),
-                        Some(14),
+                        Some(16),
                         format!("proof directly uses more than one definition axiom: {}", names.join(" ")),
                     );
                 }
             }
+            self.store.reset(mark);
         }
     }
 
-    fn check_justified_theorem(&mut self, sref: StatementRef<'a>, def: StatementAddress) {
+    /// The conclusion of a justified theorem with each occurrence of the
+    /// associated constructor replaced by its definiens, where the hidden
+    /// variables are holes.
+    fn expanded(&self, e: &Expr, label: Label, exp: &Expansion, args: &[Expr]) -> Pattern {
+        fn plain(e: &Expr) -> Pattern {
+            match e {
+                Expr::Var(v) => Pattern::Var(*v),
+                Expr::App(l, es) => Pattern::App(*l, es.iter().map(plain).collect()),
+            }
+        }
+        fn definiens(r: &Expr, exp: &Expansion, args: &[Expr]) -> Pattern {
+            match r {
+                Expr::Var(v) => match exp.lhs_vars.iter().position(|x| x == v) {
+                    Some(i) => plain(&args[i]),
+                    None => Pattern::Hole(exp.hidden.iter().position(|x| x == v).unwrap()),
+                },
+                Expr::App(l, rs) => {
+                    Pattern::App(*l, rs.iter().map(|r| definiens(r, exp, args)).collect())
+                }
+            }
+        }
+        match e {
+            Expr::Var(v) => Pattern::Var(*v),
+            Expr::App(l, _) if *l == label => definiens(&exp.rhs, exp, args),
+            Expr::App(l, es) => {
+                Pattern::App(*l, es.iter().map(|e| self.expanded(e, label, exp, args)).collect())
+            }
+        }
+    }
+
+    fn check_justified_theorem(
+        &mut self,
+        sref: StatementRef<'a>,
+        def: StatementAddress,
+        proof: Result<Proof, Diagnostic>,
+    ) {
         let addr = sref.address();
         let Some(c) = self.defs[&def].constructor else { return };
         let cname = self.constructor_name(c).to_owned();
         let Some(frame) = self.frame(sref) else { return };
         let hyp_addrs: Vec<StatementAddress> = Self::essentials(frame).collect();
 
-        // Rule 16.
+        // Rule 18.
         for &h in &hyp_addrs {
-            if let Some(f) = self.formula(&self.stmt(h)) {
+            if let Some(e) = self.tree(h) {
                 let mut cs = Vec::new();
-                self.formula_constructors(f, &mut cs);
+                self.constructors(e, &mut cs);
                 if cs.contains(&c) {
                     self.report(
                         addr,
-                        Some(16),
+                        Some(18),
                         format!(
                             "$e hypothesis {} contains the associated constructor '{cname}'",
                             self.stmt_name(h)
@@ -905,11 +964,11 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // Rule 15.
+        // Rule 17.
         if let Some(l) = self.later_in(addr, c) {
             self.report(
                 addr,
-                Some(15),
+                Some(17),
                 format!(
                     "contains '{}', which is defined later than the associated constructor '{cname}'",
                     self.constructor_name(l)
@@ -929,7 +988,7 @@ impl<'a> Checker<'a> {
         if !later_uses.is_empty() {
             self.report(
                 addr,
-                Some(15),
+                Some(17),
                 format!(
                     "proof contains syntax defined later than the associated constructor '{cname}': {}",
                     later_uses.join(", ")
@@ -937,8 +996,8 @@ impl<'a> Checker<'a> {
             );
         }
 
-        // Rule 17.
-        let Some(concl) = self.formula(&sref).and_then(|f| self.expr(f)) else {
+        // Rule 19.
+        let Some(concl) = self.tree(addr).cloned() else {
             self.unparsed.insert(addr);
             return;
         };
@@ -954,7 +1013,7 @@ impl<'a> Checker<'a> {
             _ => {
                 self.report(
                     addr,
-                    Some(17),
+                    Some(19),
                     format!("occurrences of the associated constructor '{cname}' in the conclusion have different arguments"),
                 );
                 None
@@ -962,9 +1021,8 @@ impl<'a> Checker<'a> {
         };
 
         // The proof itself.
-        let mut arr = ProofTreeArray::new(true);
-        let qed = match self.db.verify_one(&mut arr, sref) {
-            Ok(qed) => qed,
+        let proof = match proof {
+            Ok(proof) => proof,
             Err(diag) => {
                 self.report(
                     addr,
@@ -974,13 +1032,11 @@ impl<'a> Checker<'a> {
                 return;
             }
         };
-        let exprs = arr.exprs().unwrap();
-        let toks = |i: usize| -> Vec<&[u8]> {
-            exprs[i].split(|&b| b == b' ').filter(|t| !t.is_empty()).collect()
-        };
+        let arr = &proof.arr;
+        let qed = proof.qed;
         let typecode = self.symbol(&sref.math_at(0));
 
-        // Rule 18.
+        // Rule 20.
         let last = self.stmt(arr.trees[qed].address);
         let last_frame = last.is_assertion().then(|| self.frame(last)).flatten();
         let ess_positions: Vec<usize> = last_frame
@@ -996,7 +1052,7 @@ impl<'a> Checker<'a> {
         let (Some(last_frame), &[p1, p2]) = (last_frame, &ess_positions[..]) else {
             self.report(
                 addr,
-                Some(18),
+                Some(20),
                 format!(
                     "final step uses {}, which is not an assertion with exactly two $e hypotheses",
                     as_str(last.label())
@@ -1008,25 +1064,26 @@ impl<'a> Checker<'a> {
         let e1 = arr.trees[qed].children[p1];
         let e2 = arr.trees[qed].children[p2];
 
-        // Rule 19.
-        let concl_toks: Vec<&[u8]> = sref.math_iter().skip(1).map(|t| t.slice).collect();
-        if toks(e1) != concl_toks || hyp_tc(p1) != typecode {
+        // Rule 21. Conclusions are compared as parse trees.
+        if let Some(t1) = proof.terms[e1]
+            && (Some(t1) != self.terms.get(&addr).copied() || hyp_tc(p1) != typecode)
+        {
+            let found = self.render(&self.store.expr(t1));
             self.report(
                 addr,
-                Some(19),
+                Some(21),
                 format!(
-                    "first subproof's conclusion does not match the final step's conclusion; it is '{}'",
-                    as_str(&exprs[e1]).trim()
+                    "first subproof's conclusion does not match the final step's conclusion; it is '{found}'"
                 ),
             );
         }
 
-        // Rule 20.
+        // Rule 22.
         let step = &arr.trees[e1];
         if step.address != def {
             self.report(
                 addr,
-                Some(20),
+                Some(22),
                 format!(
                     "first subproof ends in {}, not in the definition axiom {}",
                     self.stmt_name(step.address),
@@ -1042,13 +1099,13 @@ impl<'a> Checker<'a> {
             if !direct {
                 self.report(
                     addr,
-                    Some(20),
+                    Some(22),
                     "$e hypotheses of the definition axiom are not all satisfied directly by $e hypotheses of the justified theorem".into(),
                 );
             }
         }
 
-        // Rule 22. The definition axiom contains the associated constructor,
+        // Rule 24. The definition axiom contains the associated constructor,
         // so this also catches a use of it.
         let mut stack = vec![e2];
         let mut seen = vec![false; arr.trees.len()];
@@ -1069,7 +1126,7 @@ impl<'a> Checker<'a> {
         if !bad_uses.is_empty() {
             self.report(
                 addr,
-                Some(22),
+                Some(24),
                 format!(
                     "second subproof contains the associated constructor '{cname}': {}",
                     bad_uses.join(" ")
@@ -1077,109 +1134,66 @@ impl<'a> Checker<'a> {
             );
         }
 
-        // Rules 21 and 23 need the expansion and consistent arguments.
-        let (Some(exp), Some(args)) = (&self.expansions[c], args) else { return };
-        let mut expected = Vec::new();
-        self.flatten(&concl, &mut expected, &mut |e, out| match e {
-            Expr::App(l, _) if *l == label => {
-                self.flatten(&exp.rhs, out, &mut |r, out| match r {
-                    Expr::Var(v) => {
-                        if let Some(i) = exp.lhs_vars.iter().position(|x| x == v) {
-                            self.flatten(&args[i], out, &mut |_, _| false);
-                        } else {
-                            let h = exp.hidden.iter().position(|x| x == v).unwrap();
-                            out.push(Tok::Hole(h));
-                        }
-                        true
-                    }
-                    Expr::App(..) => false,
-                });
-                true
-            }
-            _ => false,
-        });
+        // Rules 23 and 25 need the expansion, consistent arguments, and the
+        // parse tree of the second subproof's conclusion.
+        let (Some(exp), Some(args), Some(t2)) = (&self.expansions[c], args, proof.terms[e2]) else {
+            return;
+        };
+        let expected = self.expanded(&concl, label, exp, &args);
+        let hidden_labels = exp.hidden.clone();
+        let hidden: Vec<(Symbol, Symbol)> = hidden_labels.iter().map(|h| self.floats[h]).collect();
+        let actual = self.store.expr(t2);
 
-        // Rule 21: match the second subproof's conclusion against the expected
-        // string, where each hole is a hidden variable.
-        let actual: Vec<Option<Symbol>> = toks(e2).iter().map(|t| self.symbol(t)).collect();
-        let mut dummies: Vec<Option<Symbol>> = vec![None; exp.hidden.len()];
-        let matched = actual.len() == expected.len()
-            && hyp_tc(p2) == typecode
-            && expected.iter().zip(&actual).all(|(e, &a)| match *e {
-                Tok::Sym(s) => a == Some(s),
-                Tok::Hole(h) => match (dummies[h], a) {
-                    (Some(d), _) => a == Some(d),
-                    (None, Some(a)) => {
-                        dummies[h] = Some(a);
-                        true
-                    }
-                    (None, None) => false,
-                },
-            });
-        if !matched {
+        // Rule 23: match the second subproof's conclusion against the
+        // expected parse tree, where each hole is a hidden variable.
+        let mut holes: Vec<Option<&Expr>> = vec![None; hidden.len()];
+        if !expected.matches(&actual, &mut holes) || hyp_tc(p2) != typecode {
+            let mut toks = Vec::new();
+            self.render_pattern(&expected, &hidden_labels, &mut toks);
             self.report(
                 addr,
-                Some(21),
+                Some(23),
                 format!(
                     "second subproof's conclusion is not the final step's conclusion with the definiens (RHS) substituted\n  expected: {}\n  found:    {}",
-                    self.render_toks(&expected, &exp.hidden),
-                    as_str(&exprs[e2]).trim()
+                    toks.join(" "),
+                    self.render(&actual)
                 ),
             );
             return;
         }
 
-        // Rule 21, continued: the hidden variables must be replaced by
+        // Rule 23, continued: the hidden variables must be replaced by
         // distinct fresh dummy variables.
-        let hidden: Vec<(Symbol, Symbol)> = exp.hidden.iter().map(|h| self.floats[h]).collect();
         let stmt_vars = self.statement_vars(sref, frame);
-        // Types of variables. `metamath-rs` doesn't check that every `$f`
-        // statement for a variable has the same type, so take the ones this
-        // statement uses: its mandatory `$f` hypotheses, and those its proof
-        // uses for dummy variables.
-        let mut scoped_types: HashMap<Symbol, Symbol> = frame
-            .hypotheses
-            .iter()
-            .filter_map(|h| match *h {
-                Hyp::Floating(_, i, tc) => Some((frame.var_list[i], tc)),
-                Hyp::Essential(..) => None,
-            })
-            .collect();
-        for tree in &arr.trees {
-            let f = self.stmt(tree.address);
-            if f.statement_type() == StatementType::Floating
-                && let (Some(tc), Some(var)) = (self.symbol(&f.math_at(0)), self.symbol(&f.math_at(1)))
-            {
-                scoped_types.entry(var).or_insert(tc);
-            }
-        }
         let mut fresh: Vec<Symbol> = Vec::new();
-        for (h, d) in dummies.iter().enumerate() {
+        for (h, d) in holes.iter().enumerate() {
             // A hidden variable that occurs in no hole has nothing to check.
             let Some(d) = *d else { continue };
             let hidden_name = self.name(hidden[h].0);
-            let dname = self.name(d);
-            let is_var = self
-                .nset
-                .lookup_symbol(self.nset.atom_name(d))
-                .is_some_and(|s| s.stype == SymbolType::Variable);
+            let dname = self.render(d);
             let mut problems = Vec::new();
-            if !is_var {
-                problems.push("is not a variable".to_owned());
-            } else if scoped_types.get(&d) != Some(&hidden[h].1) {
-                problems.push("has a different type".to_owned());
+            match d {
+                Expr::App(..) => problems.push("is not a variable".to_owned()),
+                Expr::Var(l) => {
+                    // The type is that of the `$f` statement the proof
+                    // uses, as a variable may have several.
+                    let (var, tc) = self.floats[l];
+                    if tc != hidden[h].1 {
+                        problems.push("has a different type".to_owned());
+                    }
+                    if stmt_vars.contains(&var) {
+                        problems.push("is not a dummy variable (it occurs in the conclusion or $e hypotheses)".to_owned());
+                    }
+                    if fresh.contains(&var) {
+                        problems.push("also replaces another hidden variable".to_owned());
+                    }
+                    fresh.push(var);
+                }
             }
-            if stmt_vars.contains(&d) {
-                problems.push("is not a dummy variable (it occurs in the conclusion or $e hypotheses)".to_owned());
-            }
-            if fresh.contains(&d) {
-                problems.push("also replaces another hidden variable".to_owned());
-            }
-            fresh.push(d);
             if !problems.is_empty() {
                 self.report(
                     addr,
-                    Some(21),
+                    Some(23),
                     format!(
                         "'{dname}', which replaces hidden variable '{hidden_name}', {}",
                         problems.join(" and ")
@@ -1188,7 +1202,17 @@ impl<'a> Checker<'a> {
             }
         }
 
-        // Rule 23.
+        // Rule 25. `metamath-rs` doesn't check that every `$f` statement for a
+        // variable has the same type, so take the types this statement uses:
+        // those of its mandatory `$f` hypotheses.
+        let scoped_types: HashMap<Symbol, Symbol> = frame
+            .hypotheses
+            .iter()
+            .filter_map(|h| match *h {
+                Hyp::Floating(_, i, tc) => Some((frame.var_list[i], tc)),
+                Hyp::Essential(..) => None,
+            })
+            .collect();
         let mut arg_vars = HashSet::new();
         for a in &args {
             a.for_each_var(&mut |v| {
@@ -1214,7 +1238,7 @@ impl<'a> Checker<'a> {
         if !pairs.is_empty() {
             self.report(
                 addr,
-                Some(23),
+                Some(25),
                 format!(
                     "DV restriction between a fresh dummy variable and a non-dummy variable of non-bound type outside the arguments: {}",
                     pairs.join(", ")

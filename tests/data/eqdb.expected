@@ -1,0 +1,5 @@
+error[rule 23]: bad23: second subproof's conclusion is not the final step's conclusion with the definiens (RHS) substituted
+  expected: suc 1 = suc 1
+  found:    2 = 2
+error[rule 24]: bad23: second subproof contains the associated constructor 'c2': c2
+2 errors, 0 warnings, 0 database diagnostics

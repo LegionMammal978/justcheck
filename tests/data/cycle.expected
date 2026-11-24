@@ -1,0 +1,5 @@
+error[rule 5]: cv: ambiguous syntax: 'x' can be parsed in more than one way
+error[rule 5]: vc: ambiguous syntax: 'A' can be parsed in more than one way
+error[rule 5]: weq: ambiguous syntax: 'A' can be parsed in more than one way
+error[rule 5]: ax-1: ambiguous syntax: 'x' can be parsed in more than one way
+4 errors, 0 warnings, 0 database diagnostics

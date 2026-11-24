@@ -1,14 +1,14 @@
-error[rule 21]: bad22: second subproof's conclusion is not the final step's conclusion with the definiens (RHS) substituted
+error[rule 23]: bad24: second subproof's conclusion is not the final step's conclusion with the definiens (RHS) substituted
   expected: ( -. ( ph -> -. ps ) <-> -. ( ph -> -. ps ) )
   found:    ( ( ph /\ ps ) <-> ( ph /\ ps ) )
-error[rule 22]: bad22: second subproof contains the associated constructor 'wa': wa
-error[rule 21]: bad21a: second subproof's conclusion is not the final step's conclusion with the definiens (RHS) substituted
+error[rule 24]: bad24: second subproof contains the associated constructor 'wa': wa
+error[rule 23]: bad23a: second subproof's conclusion is not the final step's conclusion with the definiens (RHS) substituted
   expected: ( -. ( ph -> -. ps ) <-> -. ( ph -> -. ps ) )
   found:    ( ph <-> ph )
-error[rule 17]: bad17: occurrences of the associated constructor 'wa' in the conclusion have different arguments
-error[rule 22]: bad17: second subproof contains the associated constructor 'wa': wa
-error[rule 6]: bad6: mandatory DV restriction between variables of non-bound type: ph ps
-error[rule 21]: bad21b: 'x', which replaces hidden variable 'x', is not a dummy variable (it occurs in the conclusion or $e hypotheses)
-error[rule 14]: bad14: proof directly uses more than one definition axiom: df-an df-tru
-error[rule 23]: bad23: DV restriction between a fresh dummy variable and a non-dummy variable of non-bound type outside the arguments: y ch
+error[rule 19]: bad19: occurrences of the associated constructor 'wa' in the conclusion have different arguments
+error[rule 24]: bad19: second subproof contains the associated constructor 'wa': wa
+error[rule 8]: bad8: mandatory DV restriction between variables of non-bound type: ph ps
+error[rule 23]: bad23b: 'x', which replaces hidden variable 'x', is not a dummy variable (it occurs in the conclusion or $e hypotheses)
+error[rule 16]: bad16: proof directly uses more than one definition axiom: df-an df-tru
+error[rule 25]: bad25: DV restriction between a fresh dummy variable and a non-dummy variable of non-bound type outside the arguments: y ch
 9 errors, 0 warnings, 0 database diagnostics

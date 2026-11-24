@@ -1,2 +1,2 @@
-error[rule 23]: t1: DV restriction between a fresh dummy variable and a non-dummy variable of non-bound type outside the arguments: z B
+error[rule 25]: t1: DV restriction between a fresh dummy variable and a non-dummy variable of non-bound type outside the arguments: z B
 1 errors, 0 warnings, 0 database diagnostics

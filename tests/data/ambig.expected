@@ -1,0 +1,12 @@
+error[rule 5]: bad: proof step using pm2.24ii satisfies hypothesis pm2.24ii.2 as a string but not as a parse tree, so the proof relies on an ambiguity
+  string:   -. suc (/) !! = (/)
+  expected: (wn (wceq (cbad (csuc c0)) c0))
+  found:    (wn (wceq (csuc (cbad c0)) c0))
+error[rule 5]: lem1: ambiguous syntax: 'suc (/) !!' can be parsed in more than one way
+error[rule 5]: lem2: ambiguous syntax: 'suc (/) !!' can be parsed in more than one way
+error[rule 5]: bad3.1: ambiguous syntax: 'suc A !!' can be parsed in more than one way
+error[rule 5]: bad4: ambiguous syntax: 'suc (/) !!' can be parsed in more than one way
+error[rule 5]: bad5: ambiguous syntax: 'suc suc A' can be parsed in more than one way
+error[rule 5]: csuc2: ambiguous syntax: 'suc suc A' can be parsed in more than one way
+error[rule 5]: bad6: ambiguous syntax: 'suc suc A' can be parsed in more than one way
+8 errors, 0 warnings, 0 database diagnostics

@@ -1,0 +1,32 @@
+warning: Proof incomplete
+  --> syntax.mm:46:1
+   |
+46 | bad6d $p ?? ph $= ? $.
+   | ---------------------- Proof is incomplete
+   |
+warning: Proof incomplete
+  --> syntax.mm:61:1
+   |
+61 | bad6m $p |- ( ph = ph ) $= ? $.
+   | ------------------------------- Proof is incomplete
+   |
+error[rule 1]: $j syntax: 'nonexistent' is not a math constant
+error[rule 1]: $j syntax: 'ph' is not a math constant
+error[rule 1]: $j syntax: '|-' has more than one `syntax ... as` command
+error[rule 1]: $j syntax: 'class' is a syntactic type, so it cannot be a logical type
+error[rule 1]: $j syntax: 'thm' is not a syntactic type
+error[rule 1]: $j syntax: 'nonexistent' is not a math constant
+error[rule 1]: $j syntax: 'nonexistent' is not a math constant
+error[rule 6]: bad6a: typecode '!-' is neither a syntactic nor a logical type (used by 1 statement)
+error[rule 6]: bad6b: typecode 'junk' is neither a syntactic nor a logical type (used by 2 statements)
+error[rule 6]: bad6d: typecode '??' is neither a syntactic nor a logical type (used by 1 statement)
+error[rule 6]: bad6e: does not parse as 'wff': unexpected ')' at token 4
+error[rule 6]: bad6f: does not parse as 'wff': unexpected end of statement
+error[rule 6]: bad6g: does not parse as 'wff': unexpected end of statement
+error[rule 6]: bad6h: does not parse as 'wff': unexpected 'ps' at token 2
+error[rule 6]: bad6i: does not parse as 'wff': unexpected end of statement
+error[rule 6]: bad6j: does not parse as 'wff': unexpected '0' at token 1
+error[rule 6]: bad6k: does not parse as 'term': unexpected 'A' at token 1
+error[rule 6]: bad6l.1: does not parse as 'wff': unexpected '->' at token 3
+error[rule 6]: bad6m: does not parse as 'wff': unexpected '=' at token 3
+19 errors, 0 warnings, 2 database diagnostics

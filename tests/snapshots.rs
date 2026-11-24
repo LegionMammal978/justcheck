@@ -33,7 +33,7 @@ fn defs() {
 }
 
 /// Rules specific to a definition axiom are only enforced for those selected,
-/// but rules 8 and 9 still cover the whole database.
+/// but rules 10 and 11 still cover the whole database.
 #[test]
 fn defs_subset() {
     check("defs", "defs-subset", &["df-an,df-tru", "--exclude", "df-two2"]);
@@ -45,4 +45,44 @@ fn defs_subset() {
 #[test]
 fn scope() {
     check("scope", "scope", &[]);
+}
+
+/// Rules 1 and 6: `$j syntax` commands, typecodes that are neither syntactic
+/// nor logical, and statements that do not parse.
+#[test]
+fn syntax() {
+    check("syntax", "syntax", &[]);
+}
+
+/// Rule 5: ambiguous statements, and a proof that agrees with the
+/// statements it uses only as strings.
+#[test]
+fn ambig() {
+    check("ambig", "ambig", &[]);
+}
+
+/// Rule 5: types that convert to each other.
+#[test]
+fn cycle() {
+    check("cycle", "cycle", &[]);
+}
+
+/// A syntactic type with no variables, and definitions in a database where
+/// equality is the only wff. Only `bad23` is an error.
+#[test]
+fn eqdb() {
+    check("eqdb", "eqdb", &[]);
+}
+
+/// A grammar with an empty production.
+#[test]
+fn nullable() {
+    check("nullable", "nullable", &[]);
+}
+
+/// Garden paths, a variable whose type depends on the scope, and syntax
+/// theorems, none of which is an error.
+#[test]
+fn paths() {
+    check("paths", "paths", &[]);
 }

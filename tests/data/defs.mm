@@ -13,7 +13,7 @@ $( $j syntax 'wff'; syntax 'setvar'; syntax '|-' as 'wff';
       primitive 'wn' 'wi' 'wb' 'wal' 'wtop' 'wprim' 'wdup' 'vnew' 'nolabel'
         'biid';
       definition 'dfbi2' for 'wbi2';
-      definition 'nonexistent' for 'wthree';
+      definition 'nonexistent' for 'wfour';
       definition 'dfx' for 'wn';
       definition 'df-an' for 'nosuch';
       definition 'df-an' for 'wbi2'; $)
@@ -37,41 +37,41 @@ ${
 $}
 ax-any $a |- ph $.
 
-$( Rule 7. $)
+$( Rule 9. $)
 wdup $a wff [ ph ph ] $.
-$( Rule 5. $)
+$( Rule 7. $)
 vnew $a setvar ~ $.
 
 wa $a wff ( ph /\ ps ) $.
 df-an $a |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $.
 
-$( Rule 9: primitive with a definition. $)
+$( Rule 11: primitive with a definition. $)
 wprim $a wff P ph $.
 df-prim $a |- ( P ph <-> ph ) $.
-$( Rule 8: no definition. $)
+$( Rule 10: no definition. $)
 wnodef $a wff N ph $.
-$( Rule 9: two definitions. $)
+$( Rule 11: two definitions. $)
 wtwo $a wff W ph $.
 df-two1 $a |- ( W ph <-> ph ) $.
 df-two2 $a |- ( W ph <-> -. -. ph ) $.
-$( Rule 3: the target does not exist. $)
-wthree $a wff L ph $.
-df-three $a |- ( L ph <-> ph ) $.
-$( Rule 10. $)
-wten $a wff E ph $.
-df-ten $a |- -. ( E ph -> ph ) $.
-$( Rule 11. $)
-weleven $a wff Q ph ps $.
-df-eleven $a |- ( Q ph ph <-> ph ) $.
+$( Rule 4: the target does not exist. $)
+wfour $a wff L ph $.
+df-four $a |- ( L ph <-> ph ) $.
+$( Rule 12. $)
+wtwelve $a wff E ph $.
+df-twelve $a |- -. ( E ph -> ph ) $.
 $( Rule 13. $)
-wthirteen $a wff R x y $.
+wthirteen $a wff Q ph ps $.
+df-thirteen $a |- ( Q ph ph <-> ph ) $.
+$( Rule 15. $)
+wfifteen $a wff R x y $.
 ${
   $d x y $.
-  df-thirteen $a |- ( R x y <-> A. x A. y TOP ) $.
+  df-fifteen $a |- ( R x y <-> A. x A. y TOP ) $.
 $}
-$( Rule 12. $)
-wtwelve $a wff V ph $.
-df-twelve $a |- ( V ph <-> -. V ph ) $.
+$( Rule 14. $)
+wfourteen $a wff V ph $.
+df-fourteen $a |- ( V ph <-> -. V ph ) $.
 
 $( A definition whose expansion comes from a definition command. $)
 wbi2 $a wff ( ph <=> ps ) $.
@@ -87,24 +87,24 @@ bi2just $p |- -. ( ( ( ph <=> ps ) -> ( ph -> ps ) )
 dfbi2 $p |- ( ( ph <=> ps ) <-> ( ph -> ps ) ) $=
   wph wps wbi2 wph wps wi wb ax-any $.
 
-$( Rule 20 with a hypothesis. $)
+$( Rule 22 with a hypothesis. $)
 wcond $a wff D ph $.
 ${
   df-cond.1 $e |- ph $.
   df-cond $a |- ( D ph <-> ph ) $.
 $}
 ${
-  good20.1 $e |- ph $.
-  good20 $p |- ( D ph <-> ph ) $=
-    wph wcond wph wb wph wph wb wph good20.1 df-cond wph biid ax-just $.
+  good22.1 $e |- ph $.
+  good22 $p |- ( D ph <-> ph ) $=
+    wph wcond wph wb wph wph wb wph good22.1 df-cond wph biid ax-just $.
 $}
-bad20b $p |- ( D ph <-> ph ) $=
+bad22b $p |- ( D ph <-> ph ) $=
   wph wcond wph wb wph wph wb wph wph ax-any df-cond wph biid ax-just $.
 
-$( Rule 16. $)
+$( Rule 18. $)
 ${
-  bad16.1 $e |- ( ph /\ ps ) $.
-  bad16 $p |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $=
+  bad18.1 $e |- ( ph /\ ps ) $.
+  bad18 $p |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $=
     wph wps wa wph wps wn wi wn wb
     wph wps wn wi wn wph wps wn wi wn wb
     wph wps df-an
@@ -112,11 +112,11 @@ ${
     ax-just $.
 $}
 
-$( Rule 18. $)
-bad18 $p |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $= wph wps df-an $.
+$( Rule 20. $)
+bad20 $p |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $= wph wps df-an $.
 
-$( Rule 19 (and 21). $)
-bad19 $p |- ( ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) )
+$( Rule 21 (and 23). $)
+bad21 $p |- ( ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) )
               -> ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) ) $=
   wph wps wa wph wps wn wi wn wb
   wph wps wn wi wn wph wps wn wi wn wb
@@ -124,8 +124,8 @@ bad19 $p |- ( ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) )
   wph wps wn wi wn biid
   ax-imp $.
 
-$( Rule 20: a step between the final step and the definition axiom. $)
-bad20 $p |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $=
+$( Rule 22: a step between the final step and the definition axiom. $)
+bad22 $p |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $=
   wph wps wa wph wps wn wi wn wb
   wph wps wn wi wn wph wps wn wi wn wb
     wph wps wa wph wps wn wi wn wb
@@ -140,19 +140,19 @@ $( Incomplete proof. $)
 inc $p |- ( ( ph /\ ps ) <-> -. ( ph -> -. ps ) ) $=
   wph wps wa wph wps wn wi wn wb ? wph wps df-an ? ax-just $.
 
-$( Rule 21: a hidden variable is replaced by a constant. $)
+$( Rule 23: a hidden variable is replaced by a constant. $)
 wtru $a wff T. $.
 df-tru $a |- ( T. <-> A. x ( ph -> ph ) ) $.
-bad21 $p |- ( T. <-> A. x ( ph -> ph ) ) $=
+bad23 $p |- ( T. <-> A. x ( ph -> ph ) ) $=
   wtru wph wph wi vx wal wb
   wtop wtop wi vy wal wph wph wi vx wal wb
   wph vx df-tru
   wtop wtop wi vy wal wph wph wi vx wal wb ax-any
   ax-just $.
 
-$( Rule 15: the justified theorem contains syntax defined later ( ` T. ` is
+$( Rule 17: the justified theorem contains syntax defined later ( ` T. ` is
    defined after ` /\ ` ). $)
-bad15 $p |- ( ( T. /\ ps ) <-> -. ( T. -> -. ps ) ) $=
+bad17 $p |- ( ( T. /\ ps ) <-> -. ( T. -> -. ps ) ) $=
   wtru wps wa wtru wps wn wi wn wb
   wtru wps wn wi wn wtru wps wn wi wn wb
   wtru wps df-an
@@ -166,12 +166,12 @@ wx $a wff X $.
 df-x $a |- ( X <-> TOP ) $.
 df-y $a |- ( Y <-> X ) $.
 
-$( Rule 9: ` J ` and ` K ` are first contained in the same definition. $)
+$( Rule 11: ` J ` and ` K ` are first contained in the same definition. $)
 wj $a wff J $.
 wk $a wff K $.
 df-jk $a |- ( J <-> K ) $.
 
-$( Rule 9: ` H ` is first contained in a definition's hypothesis, so that is
+$( Rule 11: ` H ` is first contained in a definition's hypothesis, so that is
    its associated definition, not the later one with ` H ` in its conclusion. $)
 wh $a wff H $.
 ${
