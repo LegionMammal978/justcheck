@@ -568,8 +568,8 @@ impl<'a> Checker<'a> {
         let db = self.db;
         let n = self.syntax.len();
 
-        // Definition axioms in database order, with the constructors their
-        // conclusions contain.
+        // Definition axioms in database order, with the constructors they
+        // contain.
         let mut def_list: Vec<(StatementAddress, Vec<usize>)> = Vec::new();
         for sref in db.statements() {
             if sref.statement_type() != StatementType::Axiom {
@@ -583,11 +583,21 @@ impl<'a> Checker<'a> {
             }
             let enforced = include.matches(label, pos);
             let mut cs = Vec::new();
+            let mut parsed = true;
             match self.formula(&sref) {
                 Some(f) => self.formula_constructors(f, &mut cs),
-                None => {
-                    self.unparsed.insert(addr);
+                None => parsed = false,
+            }
+            if let Some(frame) = self.frame(sref) {
+                for hyp in Self::essentials(frame) {
+                    match self.formula(&self.stmt(hyp)) {
+                        Some(f) => self.formula_constructors(f, &mut cs),
+                        None => parsed = false,
+                    }
                 }
+            }
+            if !parsed {
+                self.unparsed.insert(addr);
             }
             cs.sort_unstable();
             cs.dedup();
@@ -596,7 +606,7 @@ impl<'a> Checker<'a> {
         }
 
         // The associated definition of a defined constructor is the first
-        // definition axiom whose conclusion contains it.
+        // definition axiom containing it, in its conclusion or `$e` hypotheses.
         let mut assoc: Vec<Option<StatementAddress>> = vec![None; n];
         let mut defined_by: HashMap<StatementAddress, Vec<usize>> = HashMap::new();
         for (addr, cs) in &def_list {
@@ -635,7 +645,7 @@ impl<'a> Checker<'a> {
                         *addr,
                         Some(9),
                         format!(
-                            "not the associated definition of any defined constructor; its conclusion contains: {}",
+                            "not the associated definition of any defined constructor; it contains: {}",
                             if contained.is_empty() { "nothing".to_owned() } else { contained.join(", ") }
                         ),
                     );

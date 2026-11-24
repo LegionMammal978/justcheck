@@ -15,9 +15,9 @@ error[rule 3]: $j definition: 'nonexistent' is not an $a or $p statement
 error[rule 3]: $j definition: constructor 'wbi2' has more than one $j definition
 error[rule 7]: wdup: variables occur more than once: ph
 error[rule 5]: vnew: typecode 'setvar' is bound
-error[rule 9]: df-prim: not the associated definition of any defined constructor; its conclusion contains: wb (primitive), wprim (primitive)
+error[rule 9]: df-prim: not the associated definition of any defined constructor; it contains: wb (primitive), wprim (primitive)
 error[rule 8]: wnodef: defined constructor has no associated definition
-error[rule 9]: df-two2: not the associated definition of any defined constructor; its conclusion contains: wn (primitive), wb (primitive), wtwo (df-two1)
+error[rule 9]: df-two2: not the associated definition of any defined constructor; it contains: wn (primitive), wb (primitive), wtwo (df-two1)
 error[rule 10]: df-ten: expansion statement of 'wten': root of the conclusion is not a constructor with two arguments
 error[rule 11]: df-eleven: expansion statement of 'weleven': definiendum (LHS) is not 'weleven' applied to distinct variables
 error[rule 13]: df-thirteen: expansion statement of 'wthirteen': DV restriction between definiendum (LHS) variables: x y
@@ -35,4 +35,6 @@ error[rule 21]: bad21: 'TOP', which replaces hidden variable 'ph', is not a vari
 error[rule 15]: bad15: contains 'wtru', which is defined later than the associated constructor 'wa'
 error[rule 15]: bad15: proof contains syntax defined later than the associated constructor 'wa': wtru (wtru)
 error[rule 9]: df-jk: associated definition of more than one defined constructor: wj wk
-28 errors, 0 warnings, 1 database diagnostics
+error[rule 10]: df-h1: expansion statement of 'wh': root of the conclusion is not a constructor with two arguments
+error[rule 9]: df-h2: not the associated definition of any defined constructor; it contains: wb (primitive), wtop (primitive), wh (df-h1)
+30 errors, 0 warnings, 1 database diagnostics

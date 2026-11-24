@@ -1,5 +1,5 @@
 $( Definition-level rules, and the remaining justified theorem rules. $)
-$c ( ) -> -. <-> /\ <=> A. T. TOP P N W S L E Q R V D Z [ ] ~ X Y J K $.
+$c ( ) -> -. <-> /\ <=> A. T. TOP P N W S L E Q R V D Z [ ] ~ X Y J K H $.
 $c wff setvar |- $.
 $v ph ps ch x y $.
 wph $f wff ph $.
@@ -170,3 +170,12 @@ $( Rule 9: ` J ` and ` K ` are first contained in the same definition. $)
 wj $a wff J $.
 wk $a wff K $.
 df-jk $a |- ( J <-> K ) $.
+
+$( Rule 9: ` H ` is first contained in a definition's hypothesis, so that is
+   its associated definition, not the later one with ` H ` in its conclusion. $)
+wh $a wff H $.
+${
+  df-h1.1 $e |- H $.
+  df-h1 $a |- TOP $.
+$}
+df-h2 $a |- ( H <-> TOP ) $.

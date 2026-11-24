@@ -14,7 +14,7 @@ error[rule 3]: $j definition: primitive constructor 'wn' has a $j definition
 error[rule 3]: $j definition: constructor 'wbi2' has more than one $j definition
 error[rule 7]: wdup: variables occur more than once: ph
 error[rule 5]: vnew: typecode 'setvar' is bound
-error[rule 9]: df-prim: not the associated definition of any defined constructor; its conclusion contains: wb (primitive), wprim (primitive)
+error[rule 9]: df-prim: not the associated definition of any defined constructor; it contains: wb (primitive), wprim (primitive)
 error[rule 8]: wnodef: defined constructor has no associated definition
 error[rule 16]: bad16: $e hypothesis bad16.1 contains the associated constructor 'wa'
 error[rule 18]: bad18: final step uses df-an, which is not an assertion with exactly two $e hypotheses
@@ -28,4 +28,5 @@ error[rule 21]: bad21: 'TOP', which replaces hidden variable 'ph', is not a vari
 error[rule 15]: bad15: contains 'wtru', which is defined later than the associated constructor 'wa'
 error[rule 15]: bad15: proof contains syntax defined later than the associated constructor 'wa': wtru (wtru)
 error[rule 9]: df-jk: associated definition of more than one defined constructor: wj wk
-21 errors, 0 warnings, 1 database diagnostics
+error[rule 9]: df-h2: not the associated definition of any defined constructor; it contains: wb (primitive), wtop (primitive), wh (df-h1)
+22 errors, 0 warnings, 1 database diagnostics
