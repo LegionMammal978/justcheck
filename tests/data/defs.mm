@@ -159,8 +159,9 @@ bad17 $p |- ( ( T. /\ ps ) <-> -. ( T. -> -. ps ) ) $=
   wtru wps wn wi wn biid
   ax-just $.
 
-$( Definitions order the constructors: ` Y ` is declared before ` X ` but
-   defined after it, so ` X ` may occur in its definition. $)
+$( Rule 14: syntax axioms order the constructors.  ` Y ` is declared before
+   ` X ` , so ` X ` is defined later and may not occur in its definition, even
+   though the definition of ` X ` comes first. $)
 wy $a wff Y $.
 wx $a wff X $.
 df-x $a |- ( X <-> TOP ) $.

@@ -14,7 +14,7 @@ To check `set.mm`, this checker can be invoked as `justcheck set.mm --exclude df
 - A syntax constructor is *primitive* if its axiom appears in a `$j primitive 'SYNTAX';` command; otherwise, it is *defined*.
 - A *definition axiom* is an `$a` statement whose label matches `df-*` (or another pattern as configured in `--defs`).
 - The *associated definition* of a defined syntax constructor is the first definition axiom in the database containing that syntax constructor.
-- A defined syntax constructor is *defined later* than another when its associated definition appears later in the database.
+- A defined syntax constructor is *defined later* than another when its syntax axiom appears later in the database.
 - The *expansion statement* of a defined syntax constructor is a `$a` or `$p` statement referred to by a `$j definition 'DEFTHM' for 'SYNTAX';` command if one is present; otherwise, the expansion statement is the associated definition. It defines an *expansion* with a *definiendum* (LHS) and a *definiens* (RHS).
 - The *hidden variables* of an expansion are those that appear in the definiens (RHS) but not in the definiendum (LHS).
 - A *justified theorem* of a definition axiom is any `$p` statement that directly uses the axiom, with an *associated constructor* corresponding to the definition axiom.

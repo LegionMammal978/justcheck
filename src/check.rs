@@ -104,9 +104,6 @@ pub struct Checker<'a> {
     /// Whether each constructor has exactly one associated definition, and
     /// it is enforced.
     enforced: Vec<bool>,
-    /// Position of each constructor's associated definition, which orders
-    /// the defined constructors.
-    rank: Vec<Option<u32>>,
     diags: Vec<Diag>,
 }
 
@@ -139,7 +136,6 @@ impl<'a> Checker<'a> {
             defs: HashMap::default(),
             expansions: Vec::new(),
             enforced: Vec::new(),
-            rank: Vec::new(),
             diags: Vec::new(),
         };
         for (i, sref) in db.statements().enumerate() {
@@ -515,17 +511,18 @@ impl<'a> Checker<'a> {
         self.contains.get(&addr).is_some_and(|cs| cs.binary_search(&c).is_ok())
     }
 
-    /// Whether constructor `d` is defined later than constructor `c`. Only
-    /// defined constructors with an associated definition are ordered.
+    /// Whether constructor `d` is defined later than constructor `c`: both
+    /// are defined, and the syntax axiom of `d` comes later. The syntax
+    /// axioms are numbered in database order.
     fn is_later(&self, d: usize, c: usize) -> bool {
-        matches!((self.rank[d], self.rank[c]), (Some(a), Some(b)) if a > b)
+        !self.primitive[d] && !self.primitive[c] && d > c
     }
 
     /// The latest-defined constructor contained in an assertion that is
     /// defined later than `c`, if any.
     fn later_in(&self, addr: StatementAddress, c: usize) -> Option<usize> {
         let cs = self.contains.get(&addr)?;
-        cs.iter().copied().filter(|&d| self.is_later(d, c)).max_by_key(|&d| self.rank[d])
+        cs.iter().copied().filter(|&d| self.is_later(d, c)).max()
     }
 
     // ---------------------------------------------------------------------
@@ -657,7 +654,6 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        self.rank = assoc.iter().map(|a| a.map(|a| self.pos[&a])).collect();
         self.enforced = vec![false; n];
 
         // Rules 10 and 11, for the whole database.

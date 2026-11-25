@@ -34,7 +34,8 @@ error: inc: justified theorem does not have a complete, valid proof (ProofIncomp
 error[rule 23]: bad23: 'TOP', which replaces hidden variable 'ph', is not a variable
 error[rule 17]: bad17: contains 'wtru', which is defined later than the associated constructor 'wa'
 error[rule 17]: bad17: proof contains syntax defined later than the associated constructor 'wa': wtru (wtru)
+error[rule 14]: df-y: expansion statement of 'wy': definiens (RHS) contains the constructor itself or a later-defined constructor: wx
 error[rule 11]: df-jk: associated definition of more than one defined constructor: wj wk
 error[rule 12]: df-h1: expansion statement of 'wh': root of the conclusion is not a constructor with two arguments
 error[rule 11]: df-h2: not the associated definition of any defined constructor; it contains: wb (primitive), wtop (primitive), wh (df-h1)
-30 errors, 0 warnings, 1 database diagnostics
+31 errors, 0 warnings, 1 database diagnostics
