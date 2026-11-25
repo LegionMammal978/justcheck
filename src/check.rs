@@ -3,8 +3,6 @@
 mod proof;
 mod syntax;
 
-use std::collections::{HashMap, HashSet};
-
 use metamath_rs::diag::Diagnostic;
 use metamath_rs::nameck::Nameset;
 use metamath_rs::scopeck::{Frame, Hyp};
@@ -14,6 +12,7 @@ use metamath_rs::{Database, Label, StatementRef, StatementType, Symbol, as_str};
 use crate::earley::{Grammar, Nt};
 use crate::expr::{Expr, Pattern, Store, TemplateTok, TermId};
 use crate::pattern::Pattern as LabelPattern;
+use crate::{HashMap, HashSet};
 
 use self::proof::Proof;
 
@@ -33,6 +32,7 @@ pub struct Diag {
 #[derive(Debug)]
 struct SyntaxAxiom {
     addr: StatementAddress,
+    label: Label,
     name: String,
     typecode: Symbol,
     template: Vec<TemplateTok>,
@@ -67,6 +67,10 @@ pub struct Checker<'a> {
     nset: &'a Nameset,
     /// Position of every statement in database order.
     pos: HashMap<StatementAddress, u32>,
+    /// Label of every labelled statement.
+    labels: HashMap<StatementAddress, Label>,
+    /// Frame of every assertion.
+    frames: HashMap<StatementAddress, &'a Frame>,
     /// The syntactic types.
     syntactic: HashSet<Symbol>,
     /// The logical types, with their corresponding types.
@@ -114,23 +118,25 @@ impl<'a> Checker<'a> {
         let mut checker = Checker {
             db,
             nset,
-            pos: HashMap::new(),
-            syntactic: HashSet::new(),
-            logical: HashMap::new(),
-            bound_types: HashSet::new(),
-            floats: HashMap::new(),
+            pos: HashMap::default(),
+            labels: HashMap::default(),
+            frames: HashMap::default(),
+            syntactic: HashSet::default(),
+            logical: HashMap::default(),
+            bound_types: HashSet::default(),
+            floats: HashMap::default(),
             syntax: Vec::new(),
-            syntax_index: HashMap::new(),
+            syntax_index: HashMap::default(),
             primitive: Vec::new(),
             jdefs: Vec::new(),
-            type_index: HashMap::new(),
+            type_index: HashMap::default(),
             grammar: None,
-            trees: HashMap::new(),
-            terms: HashMap::new(),
+            trees: HashMap::default(),
+            terms: HashMap::default(),
             store: Store::default(),
-            contains: HashMap::new(),
-            unparsed: HashSet::new(),
-            defs: HashMap::new(),
+            contains: HashMap::default(),
+            unparsed: HashSet::default(),
+            defs: HashMap::default(),
             expansions: Vec::new(),
             enforced: Vec::new(),
             rank: Vec::new(),
@@ -138,6 +144,14 @@ impl<'a> Checker<'a> {
         };
         for (i, sref) in db.statements().enumerate() {
             checker.pos.insert(sref.address(), i as u32);
+            if let Some(label) = checker.label_atom(sref.label()) {
+                checker.labels.insert(sref.address(), label);
+            }
+            if sref.is_assertion()
+                && let Some(frame) = db.scope_result().get(sref.label())
+            {
+                checker.frames.insert(sref.address(), frame);
+            }
             if sref.statement_type() == StatementType::Floating {
                 let (Some(tc), Some(var), Some(label)) = (
                     checker.symbol(&sref.math_at(0)),
@@ -207,7 +221,12 @@ impl<'a> Checker<'a> {
     }
 
     fn frame(&self, sref: StatementRef<'_>) -> Option<&'a Frame> {
-        self.db.scope_result().get(sref.label())
+        self.frames.get(&sref.address()).copied()
+    }
+
+    /// The label of a statement.
+    fn label(&self, addr: StatementAddress) -> Option<Label> {
+        self.labels.get(&addr).copied()
     }
 
     /// The parse tree of an `$a`, `$e` or `$p` statement.
@@ -298,7 +317,7 @@ impl<'a> Checker<'a> {
     /// Variables occurring in the math strings of a statement's conclusion
     /// and `$e` hypotheses, i.e. its variables that are not dummy variables.
     fn statement_vars(&self, sref: StatementRef<'a>, frame: &Frame) -> HashSet<Symbol> {
-        let mut vars = HashSet::new();
+        let mut vars = HashSet::default();
         let mut add = |sref: StatementRef<'a>| {
             for tok in sref.math_iter().skip(1) {
                 if let Some(s) = self.nset.lookup_symbol(&tok)
@@ -350,6 +369,7 @@ impl<'a> Checker<'a> {
             self.syntax_index.insert(label, self.syntax.len());
             self.syntax.push(SyntaxAxiom {
                 addr: sref.address(),
+                label,
                 name: as_str(sref.label()).to_owned(),
                 typecode: tc,
                 template,
@@ -470,7 +490,7 @@ impl<'a> Checker<'a> {
             }
             let addr = sref.address();
             let mut cs = Vec::new();
-            if let Some(&i) = self.label_atom(sref.label()).and_then(|a| self.syntax_index.get(&a)) {
+            if let Some(&i) = self.label(addr).and_then(|a| self.syntax_index.get(&a)) {
                 cs.push(i);
             } else {
                 let mut parsed = true;
@@ -628,7 +648,7 @@ impl<'a> Checker<'a> {
         // The associated definition of a defined constructor is the first
         // definition axiom containing it, in its conclusion or `$e` hypotheses.
         let mut assoc: Vec<Option<StatementAddress>> = vec![None; n];
-        let mut defined_by: HashMap<StatementAddress, Vec<usize>> = HashMap::new();
+        let mut defined_by: HashMap<StatementAddress, Vec<usize>> = HashMap::default();
         for (addr, cs) in &def_list {
             for &c in cs {
                 if !self.primitive[c] && assoc[c].is_none() {
@@ -784,7 +804,7 @@ impl<'a> Checker<'a> {
         };
 
         // Rule 13.
-        let label = self.label_atom(self.stmt(self.syntax[c].addr).label())?;
+        let label = self.syntax[c].label;
         let lhs_vars: Option<Vec<Label>> = match lhs {
             Expr::App(l, args) if *l == label => args
                 .iter()
@@ -1001,7 +1021,7 @@ impl<'a> Checker<'a> {
             self.unparsed.insert(addr);
             return;
         };
-        let label = self.label_atom(self.stmt(self.syntax[c].addr).label()).unwrap();
+        let label = self.syntax[c].label;
         let mut occurrences: Vec<&[Expr]> = Vec::new();
         concl.for_each_app(&mut |l, args| {
             if l == label {
@@ -1213,7 +1233,7 @@ impl<'a> Checker<'a> {
                 Hyp::Essential(..) => None,
             })
             .collect();
-        let mut arg_vars = HashSet::new();
+        let mut arg_vars = HashSet::default();
         for a in &args {
             a.for_each_var(&mut |v| {
                 arg_vars.insert(self.floats[&v].0);

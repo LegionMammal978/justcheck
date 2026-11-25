@@ -12,39 +12,10 @@
 //! some parsed string runs into it.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::hash::{BuildHasherDefault, Hash, Hasher};
+use std::hash::Hash;
 use std::rc::Rc;
 
-/// A fast hasher for the small integer keys of the parser's tables.
-#[derive(Default)]
-struct FastHasher(u64);
-
-impl Hasher for FastHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.write_u64(b.into());
-        }
-    }
-
-    fn write_u32(&mut self, n: u32) {
-        self.write_u64(n.into());
-    }
-
-    fn write_u64(&mut self, n: u64) {
-        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x517c_c1b7_2722_0a95);
-    }
-
-    fn write_usize(&mut self, n: usize) {
-        self.write_u64(n as u64);
-    }
-}
-
-type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FastHasher>>;
+use crate::{HashMap, HashSet};
 
 /// A nonterminal, numbered from zero.
 pub type Nt = u32;
@@ -95,7 +66,7 @@ enum Look<T> {
     End,
 }
 
-type Predictions<T> = FastMap<(Nt, Look<T>), Rc<[u32]>>;
+type Predictions<T> = HashMap<(Nt, Look<T>), Rc<[u32]>>;
 
 #[derive(Debug)]
 pub struct Grammar<T> {
@@ -131,9 +102,9 @@ struct Item<L> {
     back: Back<L>,
 }
 
+/// The items that end at one position of the input.
 struct Set<L> {
     items: Vec<Item<L>>,
-    index: FastMap<(u32, u32, u32), u32>,
     /// Items whose next symbol is a nonterminal, with that nonterminal.
     waiting: Vec<(Nt, u32)>,
     /// Completed items that span no tokens, with their nonterminal.
@@ -141,11 +112,10 @@ struct Set<L> {
     predicted: Vec<Nt>,
 }
 
-impl<L: Copy + PartialEq> Set<L> {
+impl<L: Copy> Set<L> {
     fn new() -> Self {
         Set {
             items: Vec::new(),
-            index: FastMap::default(),
             waiting: Vec::new(),
             empty: Vec::new(),
             predicted: Vec::new(),
@@ -159,20 +129,36 @@ impl<L: Copy + PartialEq> Set<L> {
             .filter(move |&&(n, _)| n == nt)
             .map(|&(_, w)| (w, self.items[w as usize]))
     }
+}
 
+/// How many items to expect in a set. Most sets of a typical grammar are
+/// smaller.
+const ITEMS_PER_SET: usize = 32;
+
+/// The sets for the positions reached so far.
+struct Chart<L> {
+    sets: Vec<Set<L>>,
+    /// Where each item is in its set, by set, production, dot and origin.
+    index: HashMap<(u32, u32, u32, u32), u32>,
+}
+
+impl<L: Copy + PartialEq> Chart<L> {
     /// Adds an item to the set numbered `end`. A second, different
     /// derivation of an item is an ambiguity.
     fn add(&mut self, end: usize, item: Item<L>) -> Result<(), ParseError> {
-        match self.index.get(&(item.prod, item.dot, item.origin)) {
-            Some(&i) if self.items[i as usize].back == item.back => Ok(()),
+        let set = &mut self.sets[end];
+        match self.index.get(&(end as u32, item.prod, item.dot, item.origin)) {
+            Some(&i) if set.items[i as usize].back == item.back => Ok(()),
             Some(_) => Err(ParseError::Ambiguous {
                 start: item.origin as usize,
                 end,
             }),
             None => {
-                self.index
-                    .insert((item.prod, item.dot, item.origin), self.items.len() as u32);
-                self.items.push(item);
+                self.index.insert(
+                    (end as u32, item.prod, item.dot, item.origin),
+                    set.items.len() as u32,
+                );
+                set.items.push(item);
                 Ok(())
             }
         }
@@ -210,7 +196,7 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
         }
 
         let mut first: Vec<HashSet<Look<T>>> = (0..types)
-            .map(|n| HashSet::from([Look::Var(n as Nt)]))
+            .map(|n| HashSet::from_iter([Look::Var(n as Nt)]))
             .collect();
         changed = true;
         while changed {
@@ -245,7 +231,7 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
             by_lhs,
             nullable,
             first,
-            predict: RefCell::new(FastMap::default()),
+            predict: RefCell::new(HashMap::default()),
         }
     }
 
@@ -299,9 +285,12 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
         };
 
         let n = tokens.len();
-        let mut sets: Vec<Set<L>> = Vec::with_capacity(n + 1);
-        let mut set = Set::new();
-        set.add(
+        let mut chart = Chart {
+            sets: vec![Set::new()],
+            // Sized in advance, as growing it costs more than filling it.
+            index: HashMap::with_capacity_and_hasher(ITEMS_PER_SET * (n + 1), Default::default()),
+        };
+        chart.add(
             0,
             Item {
                 prod: start_prod,
@@ -310,20 +299,17 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
                 back: Back::Start,
             },
         )?;
-        sets.push(set);
 
-        let mut scratch: Vec<(u32, Item<L>)> = Vec::new();
+        let mut waiting: Vec<(u32, Item<L>)> = Vec::new();
         for j in 0..=n {
             let look = match tokens.get(j) {
                 Some(&Token::Const(c)) => Look::Const(c),
                 Some(&Token::Var(nt, _)) => Look::Var(nt),
                 None => Look::End,
             };
-            let (earlier, current) = sets.split_at_mut(j);
-            let set = &mut current[0];
             let mut q = 0;
-            while q < set.items.len() {
-                let item = set.items[q];
+            while q < chart.sets[j].items.len() {
+                let item = chart.sets[j].items[q];
                 let r = rhs(item.prod);
                 if item.dot as usize == r.len() {
                     // Complete: step every item waiting for this nonterminal
@@ -331,17 +317,15 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
                     if item.prod != start_prod {
                         let lhs = self.prods[item.prod as usize].lhs;
                         let k = item.origin as usize;
-                        scratch.clear();
                         if k == j {
                             // Items that start waiting later find this one
                             // through `empty`.
-                            set.empty.push((lhs, q as u32));
-                            scratch.extend(set.waiting(lhs));
-                        } else {
-                            scratch.extend(earlier[k].waiting(lhs));
+                            chart.sets[j].empty.push((lhs, q as u32));
                         }
-                        for &(w, wi) in &scratch {
-                            set.add(
+                        waiting.clear();
+                        waiting.extend(chart.sets[k].waiting(lhs));
+                        for &(w, wi) in &waiting {
+                            chart.add(
                                 j,
                                 Item {
                                     prod: wi.prod,
@@ -357,15 +341,15 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
                         }
                     }
                 } else if let Sym::Nt(nt) = r[item.dot as usize] {
-                    set.waiting.push((nt, q as u32));
+                    chart.sets[j].waiting.push((nt, q as u32));
                     let mut e = 0;
-                    while e < set.empty.len() {
-                        let (empty_nt, child) = set.empty[e];
+                    while e < chart.sets[j].empty.len() {
+                        let (empty_nt, child) = chart.sets[j].empty[e];
                         e += 1;
                         if empty_nt != nt {
                             continue;
                         }
-                        set.add(
+                        chart.add(
                             j,
                             Item {
                                 prod: item.prod,
@@ -379,10 +363,10 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
                             },
                         )?;
                     }
-                    if !set.predicted.contains(&nt) {
-                        set.predicted.push(nt);
+                    if !chart.sets[j].predicted.contains(&nt) {
+                        chart.sets[j].predicted.push(nt);
                         for &p in self.predictions(nt, look).iter() {
-                            set.add(
+                            chart.add(
                                 j,
                                 Item {
                                     prod: p,
@@ -399,8 +383,9 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
 
             // Scan.
             let Some(token) = tokens.get(j) else { break };
-            let mut next = Set::new();
-            for (i, item) in set.items.iter().enumerate() {
+            chart.sets.push(Set::new());
+            for i in 0..chart.sets[j].items.len() {
+                let item = chart.sets[j].items[i];
                 let Some(sym) = rhs(item.prod).get(item.dot as usize) else {
                     continue;
                 };
@@ -412,7 +397,7 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
                     },
                     _ => continue,
                 };
-                next.add(
+                chart.add(
                     j + 1,
                     Item {
                         prod: item.prod,
@@ -422,15 +407,15 @@ impl<T: Copy + Eq + Hash> Grammar<T> {
                     },
                 )?;
             }
-            if next.items.is_empty() {
+            if chart.sets[j + 1].items.is_empty() {
                 return Err(ParseError::NoParse { at: j });
             }
-            sets.push(next);
         }
 
-        match sets[n].index.get(&(start_prod, 1, 0)) {
+        match chart.index.get(&(n as u32, start_prod, 1, 0)) {
             Some(&accept) => {
-                let Tree::Node(_, mut children) = Self::build(&sets, n, accept as usize) else {
+                let Tree::Node(_, mut children) = Self::build(&chart.sets, n, accept as usize)
+                else {
                     unreachable!()
                 };
                 Ok(children.pop().unwrap())

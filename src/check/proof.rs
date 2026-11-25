@@ -8,8 +8,6 @@
 //! replaced by parse trees: those of the `$f` hypotheses come from their
 //! subproofs, and those of the assertions from the statement parser.
 
-use std::collections::HashMap;
-
 use metamath_rs::diag::Diagnostic;
 use metamath_rs::proof::ProofTreeArray;
 use metamath_rs::scopeck::Hyp;
@@ -51,7 +49,7 @@ impl<'a> Checker<'a> {
             let step = self.stmt(tree.address);
             let term = match step.statement_type() {
                 StatementType::Floating => {
-                    self.label_atom(step.label()).map(|l| self.store.var(l))
+                    self.label(tree.address).map(|l| self.store.var(l))
                 }
                 StatementType::Essential => self.terms.get(&tree.address).copied(),
                 StatementType::Axiom | StatementType::Provable => {
@@ -110,7 +108,7 @@ impl<'a> Checker<'a> {
         mismatches: &mut Vec<Mismatch>,
     ) -> Option<TermId> {
         let frame = self.frame(step)?;
-        let label = self.label_atom(step.label())?;
+        let label = self.label(step.address())?;
         let child = |i: usize| terms.get(*children.get(i)?).copied().flatten();
 
         // A syntax axiom builds a node from its arguments.
@@ -126,11 +124,10 @@ impl<'a> Checker<'a> {
         }
 
         // Any other assertion substitutes for the variables of its statement.
-        let mut subst: HashMap<Label, TermId> = HashMap::new();
+        let mut subst: Vec<(Label, TermId)> = Vec::new();
         for (i, hyp) in frame.hypotheses.iter().enumerate() {
             if let Hyp::Floating(addr, ..) = *hyp {
-                let float = self.label_atom(self.stmt(addr).label())?;
-                subst.insert(float, child(i)?);
+                subst.push((self.label(addr)?, child(i)?));
             }
         }
         for (i, hyp) in frame.hypotheses.iter().enumerate() {

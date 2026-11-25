@@ -13,6 +13,10 @@ use metamath_rs::database::{Database, DbOptions};
 use crate::check::{Checker, Diag};
 use crate::pattern::Pattern;
 
+/// The hash tables used throughout the crate. Their keys are atoms, addresses
+/// and other small integers, which a fast hash function suits best.
+pub(crate) use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+
 /// Checks that the definitions of a Metamath database are conservative and
 /// eliminable, following the rules for definitions with justified theorems in `README.md`.
 #[derive(Parser)]

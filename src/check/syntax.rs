@@ -1,13 +1,12 @@
 //! Syntactic and logical types, the grammar of the syntax constructors, and
 //! the parse trees of statements: rules 1, 5 and 6.
 
-use std::collections::HashMap;
-
 use metamath_rs::scopeck::Hyp;
 use metamath_rs::statement::{CommandToken, StatementAddress, SymbolType};
 use metamath_rs::{Label, StatementType, Symbol, as_str};
 
 use super::Checker;
+use crate::HashMap;
 use crate::earley::{Grammar, Nt, ParseError, Sym, Token, Tree};
 use crate::expr::{Expr, TemplateTok};
 
@@ -149,7 +148,6 @@ impl<'a> Checker<'a> {
             Tree::Leaf(label) => Expr::Var(label),
             Tree::Node(prod, children) => {
                 let s = &self.syntax[axioms[prod]];
-                let label = self.label_atom(self.stmt(s.addr).label()).unwrap();
                 let mut args: Vec<Option<Expr>> = vec![None; s.arity];
                 let occurrences = s.template.iter().filter_map(|t| match *t {
                     TemplateTok::Arg(v) => Some(v),
@@ -160,7 +158,7 @@ impl<'a> Checker<'a> {
                         args[v] = Some(self.convert(child, axioms));
                     }
                 }
-                Expr::App(label, args.into_iter().map(Option::unwrap).collect())
+                Expr::App(s.label, args.into_iter().map(Option::unwrap).collect())
             }
         }
     }
@@ -175,7 +173,7 @@ impl<'a> Checker<'a> {
         /// The label and typecode of an `$f` statement.
         type Float = (Label, Symbol);
         // Variable to its active `$f` statement.
-        let mut active: HashMap<Symbol, Float> = HashMap::new();
+        let mut active: HashMap<Symbol, Float> = HashMap::default();
         // For each open block, the previous values of what it changed.
         let mut scopes: Vec<Vec<(Symbol, Option<Float>)>> = Vec::new();
         // Typecodes that are neither syntactic nor logical, with where they
@@ -194,7 +192,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 StatementType::Floating => {
-                    if let Some(label) = self.label_atom(sref.label())
+                    if let Some(label) = self.label(sref.address())
                         && let Some(&(var, tc)) = self.floats.get(&label)
                     {
                         let prev = active.insert(var, (label, tc));

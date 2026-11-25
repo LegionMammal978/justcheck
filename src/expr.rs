@@ -1,8 +1,8 @@
 //! Parse trees of math strings.
 
-use std::collections::HashMap;
-
 use metamath_rs::{Label, Symbol};
+
+use crate::HashMap;
 
 /// A parse tree. Variables are identified by the label of their `$f`
 /// statement, constructors by the label of their syntax axiom. The arguments
@@ -128,11 +128,11 @@ impl Store {
         }
     }
 
-    /// Replaces the variables of a term. Variables missing from the
-    /// substitution are kept.
-    pub fn subst(&mut self, t: TermId, subst: &HashMap<Label, TermId>) -> TermId {
+    /// Replaces the variables of a term, given the term for each of them.
+    /// Variables missing from the substitution are kept.
+    pub fn subst(&mut self, t: TermId, subst: &[(Label, TermId)]) -> TermId {
         match self.nodes[t.0 as usize].clone() {
-            Node::Var(label) => subst.get(&label).copied().unwrap_or(t),
+            Node::Var(label) => subst.iter().find(|s| s.0 == label).map_or(t, |s| s.1),
             Node::App(label, args) => {
                 let args = args.iter().map(|&a| self.subst(a, subst)).collect();
                 self.app(label, args)
@@ -198,12 +198,11 @@ mod tests {
         let gz = store.add(&app(g, &[Expr::Var(z)]));
         // Simultaneous: the `x` substituted for `y` is not replaced again.
         let vx = store.var(x);
-        let subst = HashMap::from([(x, gz), (y, vx)]);
-        let r = store.subst(t, &subst);
+        let r = store.subst(t, &[(x, gz), (y, vx)]);
         let gz = app(g, &[Expr::Var(z)]);
         assert_eq!(store.expr(r), app(f, &[gz.clone(), app(g, &[gz, Expr::Var(x)])]));
         // Variables that are not substituted are kept.
-        assert_eq!(store.subst(t, &HashMap::new()), t);
+        assert_eq!(store.subst(t, &[]), t);
     }
 
     #[test]
