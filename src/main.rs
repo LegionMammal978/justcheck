@@ -39,7 +39,7 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let mut db = Database::new(DbOptions {
-        autosplit: true,
+        autosplit: false,
         incremental: true,
         ..DbOptions::default()
     });
